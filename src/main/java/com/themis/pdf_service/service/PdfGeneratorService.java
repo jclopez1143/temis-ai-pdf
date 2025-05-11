@@ -5,6 +5,9 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedList;
 
+import com.themis.pdf_service.client.LegalPetitionClient;
+import com.themis.pdf_service.dto.client.UserPetitionDto;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import com.themis.pdf_service.dto.ComponentDTO;
 import com.themis.pdf_service.dto.FormularioDto;
@@ -19,23 +22,14 @@ import reactor.core.publisher.Mono;
 public class PdfGeneratorService {
 
     private final IPdfGeneratorService pdfGeneratorService;
-    private final PromptService promptService;
+    private final LegalPetitionClient legalPetitionClient;
 
     public Mono<byte[]> generatePdf(FormularioDto dto) throws IOException {
 
-        Mono<String> prompt = promptService.getPrompt();
+        String legalPetitionContent = legalPetitionClient.generateLegalPetition(
+                new UserPetitionDto(dto.getEntidadDemandada(), dto.getHechos())).getBody().getContent();
 
-        prompt.switchIfEmpty(Mono.error(new RuntimeException("Prompt is empty")))
-                .doOnError(e -> {
-                    throw new RuntimeException("Error fetching prompt: " + e.getMessage());
-                });
-
-        return prompt.map(data -> {
-
-            byte[] pdf = pdfGeneratorService.print(createComponents(data, dto));
-
-            return pdf;
-        });
+        return Mono.just(pdfGeneratorService.print(createComponents(legalPetitionContent, dto)));
     }
 
     private LinkedList<ComponentDTO> createComponents(String data, FormularioDto dto) {
@@ -58,14 +52,20 @@ public class PdfGeneratorService {
                 .componentEnum(ComponentsPDFEnum.HEADLINE)
                 .build());
 
-        String texto = data
+        components.add(ComponentDTO.builder()
+                .text(Formulario.REFERENCIA.replaceAll(
+                        "\\[ENTIDAD\\]", dto.getBoldEntidadDemandada()))
+                .bold(false)
+                .componentEnum(ComponentsPDFEnum.HEADLINE)
+                .build());
+
+        String texto = Formulario.PARRAFO
                 .replaceAll("\\[NOMBRE COMPLETO\\]", dto.getBoldNombre())
                 .replaceAll("\\[CÉDULA\\]", dto.getBoldCedula())
                 .replaceAll("\\[CIUDAD\\]", dto.getBoldCiudad())
-                .replaceAll("\\[DIAGNOSTICO\\]", dto.getBoldDiagnostico())
-                .replaceAll("\\[CONDICION\\]", dto.getBoldCondicion())
                 .replaceAll("\\[FECHA\\]", LocalDate.now().toString())
-                .replaceAll("\\[ENTIDAD DEMANDADA\\]", dto.getBoldEntidadDemandada());
+                .replaceAll("\\[ENTIDAD\\]", dto.getBoldEntidadDemandada())
+                .replaceAll("\\[CONTENIDO\\]", data);
 
         components.add(ComponentDTO.builder()
                 .text(texto)
